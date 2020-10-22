@@ -4,6 +4,8 @@ import random
 import bitstring
 from struct import *
 from build_packet import *
+import time
+import threading, multiprocessing
 
 def unpack_packet(resolved_dns, transaction_id):
 	temp_resolved_dns = bitstring.BitArray(resolved_dns)
@@ -67,6 +69,8 @@ def unpack_packet(resolved_dns, transaction_id):
 	 	# refused
 		print("** Refused to perform such operation")
 
+def start_timer():
+	time.sleep(6)
 
 def main():
 
@@ -74,9 +78,9 @@ def main():
 	clientsocket = socket(AF_INET, SOCK_DGRAM) # udp socket
 
 	dnsPort = 53
-	# dnsserverIP = '8.8.8.8'
+	dnsserverIP = '8.8.8.8'
 	# dnsserverIP = '208.67.222.222'
-	dnsserverIP = '127.0.0.3'
+	# dnsserverIP = '127.0.0.3'
 	# by default
 	qtype = 'A'
 	qclass = 'IN'
@@ -84,41 +88,58 @@ def main():
 	if len(sys.argv) == 1:
 		# if there are no arguments then start iterative mode
 		while True:
-			query = input("> ")
-			# print(query)
-			if 'set' in query:
-				to_set = query.split()[1]
-				if 'type' in to_set:
-					# we need to set the type of the query to the right side =
-					# print("type is present")
-					try:
-						qtype = to_set.split('=')[1].strip()
-					except:
-						continue
-					print(qtype)
-				elif 'class' in to_set:
-					# print("class is present")
-					try:
-						qclass = to_set.split('=')[1].strip()
-					except:
-						continue
-					print(qclass)
+			try:
+				query = input("> ")
+				# print(query)
+				if 'set' in query:
+					to_set = query.split()[1]
+					if 'type' in to_set:
+						# we need to set the type of the query to the right side =
+						# print("type is present")
+						try:
+							qtype = to_set.split('=')[1].strip()
+						except:
+							continue
+						print(qtype)
+					elif 'class' in to_set:
+						# print("class is present")
+						try:
+							qclass = to_set.split('=')[1].strip()
+						except:
+							continue
+						print(qclass)
+					else:
+						print("** Invalid query or arguments. **")
+				# to exit the loop the query is exit
+				elif query == "exit":
+					clientsocket.close()
+					break
+
+				# if we have a host name as a query
 				else:
-					print("** Invalid query or arguments. **")
-			# to exit the loop the query is exit
-			elif query == "exit":
+					dns_packet, transaction_id = build_packet(query, qtype, qclass)
+
+					# now we will need to add a timeout here until we receive the response or send the query again
+					count = 0
+					while count < 3:
+						clientsocket.sendto(dns_packet.tobytes(), (dnsserverIP, dnsPort))
+						count += 1
+						resolved_dns, addr = clientsocket.recvfrom(1024)
+						thread = multiprocessing.Process(target = start_timer)
+						thread.start()
+						if resolved_dns:
+							thread.terminate()
+							break
+						
+					# print(resolved_dns)
+					if count <= 3:
+						unpack_packet(resolved_dns, transaction_id)
+					else:
+						print("Connection timed out..")
+			except:
+				print()
 				clientsocket.close()
 				break
-
-			# if we have a host name as a query
-			else:
-				dns_packet, transaction_id = build_packet(query, qtype, qclass)
-				# print(dns_packet.bytes)
-				# now we will need to add a timeout here until we receive the response or send the query again
-				clientsocket.sendto(dns_packet.tobytes(), (dnsserverIP, dnsPort))
-				resolved_dns, addr = clientsocket.recvfrom(1024)
-				# print(resolved_dns)
-				unpack_packet(resolved_dns, transaction_id)
 
 	else:
 		
@@ -130,13 +151,23 @@ def main():
 
 		# send the packet to the required server, for time being take the google dns server
 		# now we will need to add a timeout here until we receive the response or send the query again
-		clientsocket.sendto(dns_packet.tobytes(), (dnsserverIP, dnsPort))
+		count = 0
+		while count < 3:
+			clientsocket.sendto(dns_packet.tobytes(), (dnsserverIP, dnsPort))
 
-		resolved_dns, addr = clientsocket.recvfrom(1024)
-
+			resolved_dns, addr = clientsocket.recvfrom(1024)
+			thread = multiprocessing.Process(target = start_timer)
+			thread.start()
+			if resolved_dns:
+				thread.terminate()
+				break
+			else:
+				count += 1
 		# print(resolved_dns)
 
 		unpack_packet(resolved_dns, transaction_id)
+
+		clientsocket.close()
 
 
 

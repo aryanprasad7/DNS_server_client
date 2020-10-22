@@ -95,7 +95,7 @@ def handle_client_query(client_query, client_addr, serversocket):
 				if header['ancount'] != 0:
 					serversocket.sendto(response, client_addr)
 					break
-					# making a list of 'a' records
+				# making a list of 'a' records
 				record_a = []
 				for i in range(0, len(ans['additional section'])):
 					record = ans['additional section'][i]
