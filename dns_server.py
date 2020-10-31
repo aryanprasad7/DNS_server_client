@@ -31,23 +31,6 @@ def make_response(question):
 		return None
 	else:	# we have the record and we prepare the packet from it
 		pass
-	
-def getquestion(data):
-	temp_data = bitstring.BitArray(data)
-
-	header = get_header(data)
-	# print(header)
-	shift = 12 # 12 bytes
-	query, bytes_scanned = getname(temp_data, shift)
-	# print(query)
-	shift += bytes_scanned
-	qtype = unpack_from('!H', data, shift)[0]
-	qclass = unpack_from('!H', data, shift + 2)[0]
-	shift += 4
-
-	question = {"query": query, "qtype": qtype, "qclass": qclass}
-
-	return header, question, shift
 
 def handle_client_query(client_query, client_addr, serversocket):
 	serverPort = 53
@@ -56,115 +39,135 @@ def handle_client_query(client_query, client_addr, serversocket):
 	response = make_response(question)
 	client_query_type = question['qtype']
 
-	if response == None:	# record is not present in cache
+	if response == None:	# record is not present in cache call the root server for the query
 		random_root_ip = random.choice(rootserverlist)
-		
-		clientsocket = socket(AF_INET, SOCK_DGRAM)
-		clientsocket.sendto(client_query, (random_root_ip, serverPort))
-		
-		response, rootaddr = clientsocket.recvfrom(1024)
-		# print("ans after contacting the root server:\n" + str(root_ans))
-		header, question, bytes_scanned = getquestion(response)
-		print(header)
-		# as seen from observation root dns servers do not support recursion hence we need to do iterative query
-		if header['ra'] == 1 and header['ancount']:	# recursion is available, hence we get the final answer, and we forward it to the client after saving in cache
-			# after receiving the query we add it to our cache and also send the same to the client
-			serversocket.sendto(response, addr)
-
-		while True:
-			if header['rcode'] == 0:	# root server does not support recursion, hence we contact the server which we get from root server
-				shift = bytes_scanned
-				ans = {}
-				ans['answer section'] = []
-				ans['authoritative section'] = []
-				ans['additional section'] = []
-				for i in range(0, header['ancount']):
-					rdata, shift = get_answer_from_data(response, shift)
-					ans['answer section'].append(rdata)
-					
-				for i in range(0, header['nscount']):
-					rdata, shift = get_answer_from_data(response, shift)
-					ans['authoritative section'].append(rdata)
-
-				for i in range(0, header['arcount']):
-					rdata, shift = get_answer_from_data(response, shift)
-					ans['additional section'].append(rdata)
-
-				print(ans)
-
-				if header['ancount'] != 0:
-					serversocket.sendto(response, client_addr)
-					break
-				# making a list of 'a' records
-				record_a = []
-				for i in range(0, len(ans['additional section'])):
-					record = ans['additional section'][i]
-					try:
-						if record['type'] == 'a':
-							record_a.append(record)
-					except:
-						pass
-
-				print(record_a)
-				try:
-					record = random.choice(record_a)
-				except:	# if there is an error in this step => we have to query the same server with a different host
-					record_ns = []
-					for i in range(0, len(ans['authoritative section'])):
-						try:
-							if ans[i]['type'] == 'ns':
-								record_ns.append(ans[i])
-						except:
-							pass
-
-					ns_2b_queried = random.choice(record_ns)['data']
-					# now prepare a packet with the query host to be 'ns_2b_queried'
-					query_packet, t_id = build_packet(ns_2b_queried)
-					clientsocket.sendto(query_packet.tobytes(), (nxt_server2query, serverPort))
-					nresponse, ns_addr = clientsocket.recvfrom(1024)
-					print(nresponse)
-					tmp_hdr, tmp_q, tmp_bs = getquestion(nresponse)
-					print(tmp_hdr)
-					tmp_shift = tmp_bs
-					tmp_ans = []
-					for i in range(0, tmp_hdr['ancount']):
-						rdata, tmp_shift = get_answer_from_data(response, tmp_shift)
-						tmp_ans.append(rdata)
-					
-					for i in range(0, tmp_hdr['nscount']):
-						rdata, tmp_shift = get_answer_from_data(nresponse, tmp_shift)
-						tmp_ans.append(rdata)
-
-					for i in range(0, tmp_hdr['arcount']):
-						rdata, tmp_shift = get_answer_from_data(nresponse, tmp_shift)
-						tmp_ans.append(rdata)
-
-					print(tmp_ans)
-					rec_a = []
-					for i in range(0, len(tmp_ans)):
-						record = tmp_ans[i]
-						try:
-							if record['type'] == 'a':
-								rec_a.append(record)
-						except:
-							pass
-
-					# print(rec_a)
-					record = random.choice(rec_a)
-
-				nxt_server2query = record['data']
-				print(nxt_server2query)
-
-				clientsocket.sendto(client_query, (nxt_server2query, serverPort))
-				response, nxt_addr = clientsocket.recvfrom(1024)
-				print(response)
-				header, question, bytes_scanned = getquestion(response)
-				print(header)
-
+		response, ans = root_server_query(client_query, random_root_ip, serverPort, client_query_type)
+		if ans == None: # response, directly send to client after saving in cache
+			serversocket.sendto(response, client_addr)
+		else:
+			pass
 	else:
 		# after processing the data we send it back to the same addr we received it from
 		serversocket.sendto(response, client_addr)
 
+def root_server_query(client_query, random_root_ip, serverPort, client_query_type):
+	# rootserverlist = ['192.203.230.10', '199.7.83.42', '198.97.190.53', '192.112.36.4', '192.33.4.12', '198.41.0.4']
+	# random_root_ip = random.choice(rootserverlist)
+		
+	clientsocket = socket(AF_INET, SOCK_DGRAM)
+	clientsocket.sendto(client_query, (random_root_ip, serverPort))
+	
+	response, rootaddr = clientsocket.recvfrom(1024)
+	# print("ans after contacting the root server:\n" + str(root_ans))
+	header, question, bytes_scanned = getquestion(response)
+	print(header)
+	# flag = 0 # 0->response, 1->ans
+
+	# as seen from observation root dns servers do not support recursion hence we need to do iterative query
+	if header['ra'] == 1 and header['ancount']:	# recursion is available, hence we get the final answer, and we forward it to the client after saving in cache
+		# after receiving the query we add it to our cache and also send the same to the client
+		return response, None
+
+	while True:
+		if header['rcode'] == 0:	# root server does not support recursion, hence we contact the server which we get from root server
+			shift = bytes_scanned
+			ans = {}
+			ans['answer section'] = []
+			ans['authoritative section'] = []
+			ans['additional section'] = []
+			for i in range(0, header['ancount']):
+				rdata, shift = get_answer_from_data(response, shift)
+				ans['answer section'].append(rdata)
+				
+			for i in range(0, header['nscount']):
+				rdata, shift = get_answer_from_data(response, shift)
+				ans['authoritative section'].append(rdata)
+
+			for i in range(0, header['arcount']):
+				rdata, shift = get_answer_from_data(response, shift)
+				ans['additional section'].append(rdata)
+
+			print(ans)
+
+			if header['ancount'] != 0:
+				"""if the answer contains only cname!=client_query_type, then query the root server again
+					with query as the cname received, continue this process until we receive the required
+					type of the answer
+				"""
+				# serversocket.sendto(response, client_addr)
+				# flag = 1
+				for answer in ans['answer section']:
+					if answer['type'] == 'client_query_type':
+						return response, None
+					else:	# again query the root server with the cname that we get in the answer
+						return response, None
+				# return response, None
+				break
+			# making a list of 'a' records
+			record_a = []
+			for i in range(0, len(ans['additional section'])):
+				record = ans['additional section'][i]
+				try:
+					if record['type'] == 'a':
+						record_a.append(record)
+				except:
+					pass
+
+			print(record_a)
+			try:
+				record = random.choice(record_a)
+			except:	# if there is an error in this step => we have to query the same server with a different host
+				record_ns = []
+				for i in range(0, len(ans['authoritative section'])):
+					try:
+						if ans[i]['type'] == 'ns':
+							record_ns.append(ans[i])
+					except:
+						pass
+
+				ns_2b_queried = random.choice(record_ns)['data']
+				# now prepare a packet with the query host to be 'ns_2b_queried'
+				query_packet, t_id = build_packet(ns_2b_queried)
+				clientsocket.sendto(query_packet.tobytes(), (nxt_server2query, serverPort))
+				nresponse, ns_addr = clientsocket.recvfrom(1024)
+				print(nresponse)
+				tmp_hdr, tmp_q, tmp_bs = getquestion(nresponse)
+				print(tmp_hdr)
+				tmp_shift = tmp_bs
+				tmp_ans = []
+				for i in range(0, tmp_hdr['ancount']):
+					rdata, tmp_shift = get_answer_from_data(response, tmp_shift)
+					tmp_ans.append(rdata)
+				
+				for i in range(0, tmp_hdr['nscount']):
+					rdata, tmp_shift = get_answer_from_data(nresponse, tmp_shift)
+					tmp_ans.append(rdata)
+
+				for i in range(0, tmp_hdr['arcount']):
+					rdata, tmp_shift = get_answer_from_data(nresponse, tmp_shift)
+					tmp_ans.append(rdata)
+
+				print(tmp_ans)
+				rec_a = []
+				for i in range(0, len(tmp_ans)):
+					record = tmp_ans[i]
+					try:
+						if record['type'] == 'a':
+							rec_a.append(record)
+					except:
+						pass
+
+					# print(rec_a)
+				record = random.choice(rec_a)
+
+			nxt_server2query = record['data']
+			print(nxt_server2query)
+
+			clientsocket.sendto(client_query, (nxt_server2query, serverPort))
+			response, nxt_addr = clientsocket.recvfrom(1024)
+			print(response)
+			header, question, bytes_scanned = getquestion(response)
+			print(header)
 
 def main():
 	serverPort = 53

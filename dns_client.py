@@ -6,15 +6,16 @@ from struct import *
 from build_packet import *
 import time
 import threading, multiprocessing
+import datetime
 
 def unpack_packet(resolved_dns, transaction_id):
 	temp_resolved_dns = bitstring.BitArray(resolved_dns)
 	# now we have temp_resolved_dns in hex form
 	# while resolved_dns is in bytes
 
-	header = get_header(resolved_dns)
+	header, question, bytes_scanned = getquestion(resolved_dns)
 	# print(header)
-	shift = 12	# 12 bytes of the dns header
+	shift = bytes_scanned	# 12 bytes of the dns header
 
 	if header['id'][2:] == transaction_id[2:]:
 		# print("TransactionID Matched")
@@ -23,16 +24,6 @@ def unpack_packet(resolved_dns, transaction_id):
 		print("Error: received packet not matching.")
 		return
 
-	host_name, n_bytes_scanned = getname(temp_resolved_dns, shift)
-
-	shift += n_bytes_scanned
-	qtype = unpack_from('!H', resolved_dns, shift)[0]
-	qclass = unpack_from('!H', resolved_dns, shift + 2)[0]
-	shift += 4
-	# print(qtype)
-	# print(qclass)
-	# print(n_bytes_scanned)
-	# print(host_name)
 	finalans = {}
 	finalans['answer section'] = []
 	finalans['authoritative section'] = []
@@ -51,7 +42,7 @@ def unpack_packet(resolved_dns, transaction_id):
 			ans, shift = get_answer_from_data(resolved_dns, shift)
 			finalans['additional section'].append(ans)
 
-		print(finalans)
+		return (header, question, finalans)
 
 	elif header['rcode'] == 1:
 		# format error
@@ -69,18 +60,70 @@ def unpack_packet(resolved_dns, transaction_id):
 	 	# refused
 		print("** Refused to perform such operation")
 
-def start_timer():
-	time.sleep(6)
+def format_print(header, question, answer, dnsserverIP, msg_size):
+	
+	opcode = header['opcode']
+	if opcode == 0:
+		opcode = 'QUERY'
+	status = header['rcode']
+	if status == 0:
+		status = 'NOERROR'
+	print("GOT ANSWER: ")
+	print(";; ->>HEADER<<- id: {}, opcode: {}, status: {}".format(int(header['id'], 16), opcode, status))
+	print(";; flags: qr: {}, aa: {}, tc: {}, rd: {}, ra: {}; QUERY: {}, ANSWER: {}, AUTHORITY: {}, ADDITIONAL: {}\n".format(header['qr'], header['aa'], header['tc'], header['rd'], header['ra'], header['qdcount'], header['ancount'], header['nscount'], header['arcount']))
+
+	qclass = 1
+	if question['qclass'] == 1:
+		qclass = 'in'
+
+	qtype = 1
+	if qtype == 1:	# a
+		qtype = 'a'
+	elif qtype == 28:	# aaaa
+		qtype = 'aaaa'
+	elif qtype == 15:	# mx
+		qtype = 'mx'
+	elif qtype == 6:	# soa
+		qtype = 'soa'
+	elif qtype == 2:	# ns
+		qtype = 'ns'
+	elif qtype == 5:	# cname
+		qtype = 'cname'
+
+	print(";; QUESTION SECTION:")
+	print(";{}\t\t{}\t{}\n".format(question['query'], qclass.upper(), qtype.upper()))
+	
+	print(";; ANSWER SECTION:")
+	for ans in answer['answer section']:
+		print("{}\t\tIN\t{}\t{}".format(ans['name'], ans['type'].upper(), ans['data']))
+	print()
+
+	print(";; AUTHORITY SECTION:")
+	for ans in answer['authoritative section']:
+		print("{}\t\tIN\t{}\t{}".format(ans['name'], ans['type'].upper(), ans['data']))
+	print()
+
+	print(";; ADDITIONAL SECTION:")
+	for ans in answer['additional section']:
+		print("{}\t\tIN\t{}\t{}".format(ans['name'], ans['type'].upper(), ans['data']))
+	print()
+
+	print(";; SERVER: {}#53({})".format(dnsserverIP, dnsserverIP))
+	print(";; WHEN: ", end = '')
+	print(datetime.datetime.now())
+	print(";; MSG SIZE rcvd: {}".format(msg_size))
 
 def main():
 
 	# firstly create a socket
 	clientsocket = socket(AF_INET, SOCK_DGRAM) # udp socket
-
+	clientsocket.settimeout(6)
+	
 	dnsPort = 53
 	dnsserverIP = '8.8.8.8'
 	# dnsserverIP = '208.67.222.222'
 	# dnsserverIP = '127.0.0.3'
+
 	# by default
 	qtype = 'A'
 	qclass = 'IN'
@@ -118,54 +161,64 @@ def main():
 				# if we have a host name as a query
 				else:
 					dns_packet, transaction_id = build_packet(query, qtype, qclass)
-
+					resolved_dns = None
 					# now we will need to add a timeout here until we receive the response or send the query again
 					count = 0
 					while count < 3:
 						clientsocket.sendto(dns_packet.tobytes(), (dnsserverIP, dnsPort))
 						count += 1
-						resolved_dns, addr = clientsocket.recvfrom(1024)
-						thread = multiprocessing.Process(target = start_timer)
-						thread.start()
-						if resolved_dns:
-							thread.terminate()
+						try:
+							resolved_dns, addr = clientsocket.recvfrom(1024)
 							break
+						except:
+							if count < 3:
+								print("Timed out, sending again...")
 						
 					# print(resolved_dns)
 					if count <= 3:
-						unpack_packet(resolved_dns, transaction_id)
+						header, question, answer = unpack_packet(resolved_dns, transaction_id)
+						format_print(header, question, answer, dnsserverIP, len(resolved_dns))
 					else:
 						print("Connection timed out..")
+
 			except:
 				print()
 				clientsocket.close()
 				break
 
+		clientsocket.close()
+
 	else:
 		
 		query = sys.argv[1]
-		
+		resolved_dns = None
 		# now query has the host to be queried
 		# now we need to form a packet and send it to the dns server for processing
 		dns_packet, transaction_id = build_packet(query)	# this packet is in hex format, need to convert it to bytes to transmit it to the server
 
 		# send the packet to the required server, for time being take the google dns server
 		# now we will need to add a timeout here until we receive the response or send the query again
-		count = 0
-		while count < 3:
+		count = 1
+		while True:
 			clientsocket.sendto(dns_packet.tobytes(), (dnsserverIP, dnsPort))
-
-			resolved_dns, addr = clientsocket.recvfrom(1024)
-			thread = multiprocessing.Process(target = start_timer)
-			thread.start()
-			if resolved_dns:
-				thread.terminate()
+			
+			try:
+				resolved_dns, addr = clientsocket.recvfrom(1024)
 				break
-			else:
+			except:
 				count += 1
+				if count <= 3:
+					print('Timed out, Sending again...')
+				else:
+					break
+			
 		# print(resolved_dns)
 
-		unpack_packet(resolved_dns, transaction_id)
+		if count <= 3 and resolved_dns:
+			header, question, answer = unpack_packet(resolved_dns, transaction_id)
+			format_print(header, question, answer, dnsserverIP, len(resolved_dns))
+		else:
+			print("Connection timed out..")
 
 		clientsocket.close()
 

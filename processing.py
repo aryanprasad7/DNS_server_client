@@ -144,6 +144,22 @@ def get_header(resolved_dns):
 
 	return header
 
+def getquestion(data):
+	temp_data = bitstring.BitArray(data)
+
+	header = get_header(data)
+	# print(header)
+	shift = 12 # 12 bytes
+	query, bytes_scanned = getname(temp_data, shift)
+	# print(query)
+	shift += bytes_scanned
+	qtype = unpack_from('!H', data, shift)[0]
+	qclass = unpack_from('!H', data, shift + 2)[0]
+	shift += 4
+
+	question = {"query": query, "qtype": qtype, "qclass": qclass}
+
+	return header, question, shift
 
 def get_answer_from_data(resolved_dns, shift):
 	temp_resolved_dns = bitstring.BitArray(resolved_dns)
