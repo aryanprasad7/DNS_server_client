@@ -38,6 +38,18 @@ def handle_client_query(client_query, client_addr, serversocket):
 	header, question, bytes_scanned = getquestion(client_query)
 	response = make_response(question)
 	client_query_type = question['qtype']
+	if client_query_type == 1:	# a
+		client_query_type = 'a'
+	elif client_query_type == 28:	# aaaa
+		client_query_type = 'aaaa'
+	elif client_query_type == 15:	# mx
+		client_query_type = 'mx'
+	elif client_query_type == 6:	# soa
+		client_query_type = 'soa'
+	elif client_query_type == 2:	# ns
+		client_query_type = 'ns'
+	elif client_query_type == 5:	# cname
+		client_query_type = 'cname'
 
 	if response == None:	# record is not present in cache call the root server for the query
 		random_root_ip = random.choice(rootserverlist)
@@ -61,7 +73,6 @@ def root_server_query(client_query, random_root_ip, serverPort, client_query_typ
 	# print("ans after contacting the root server:\n" + str(root_ans))
 	header, question, bytes_scanned = getquestion(response)
 	print(header)
-	# flag = 0 # 0->response, 1->ans
 
 	# as seen from observation root dns servers do not support recursion hence we need to do iterative query
 	if header['ra'] == 1 and header['ancount']:	# recursion is available, hence we get the final answer, and we forward it to the client after saving in cache
@@ -97,10 +108,17 @@ def root_server_query(client_query, random_root_ip, serverPort, client_query_typ
 				# serversocket.sendto(response, client_addr)
 				# flag = 1
 				for answer in ans['answer section']:
-					if answer['type'] == 'client_query_type':
+					if answer['type'] == client_query_type:
 						return response, None
 					else:	# again query the root server with the cname that we get in the answer
 						return response, None
+
+				for answer in ans['answer section']:
+					if answer['type'] == 'cname':
+						# query the root server again with the cname data
+						data = answer['data']
+						data2bqueried, t_id = build_packet(data)
+						resp, _ = root_server_query(data2bqueried, random_root_ip, serverPort, client_query_type)
 				# return response, None
 				break
 			# making a list of 'a' records

@@ -93,32 +93,36 @@ def format_print(header, question, answer, dnsserverIP, msg_size):
 	print(";; QUESTION SECTION:")
 	print(";{}\t\t{}\t{}\n".format(question['query'], qclass.upper(), qtype.upper()))
 	
-	print(";; ANSWER SECTION:")
-	for ans in answer['answer section']:
-		print("{}\t\tIN\t{}\t{}".format(ans['name'], ans['type'].upper(), ans['data']))
-	print()
+	if header['ancount']:
+		print(";; ANSWER SECTION:")
+		for ans in answer['answer section']:
+			print("{}\t\t{}\tIN\t{}\t{}".format(ans['name'], ans['ttl'], ans['type'].upper(), ans['data']))
+		print()
 
-	print(";; AUTHORITY SECTION:")
-	for ans in answer['authoritative section']:
-		print("{}\t\tIN\t{}\t{}".format(ans['name'], ans['type'].upper(), ans['data']))
-	print()
+	if header['nscount']:
+		print(";; AUTHORITY SECTION:")
+		for ans in answer['authoritative section']:
+			print("{}\t\t{}\tIN\t{}\t{}".format(ans['name'], ans['ttl'], ans['type'].upper(), ans['data']))
+		print()
 
-	print(";; ADDITIONAL SECTION:")
-	for ans in answer['additional section']:
-		print("{}\t\tIN\t{}\t{}".format(ans['name'], ans['type'].upper(), ans['data']))
-	print()
+	if header['arcount']:
+		print(";; ADDITIONAL SECTION:")
+		for ans in answer['additional section']:
+			print("{}\t\t{}\tIN\t{}\t{}".format(ans['name'], ans['ttl'], ans['type'].upper(), ans['data']))
+		print()
 
 	print(";; SERVER: {}#53({})".format(dnsserverIP, dnsserverIP))
 	print(";; WHEN: ", end = '')
 	print(datetime.datetime.now())
-	print(";; MSG SIZE rcvd: {}".format(msg_size))
+	print(";; MSG SIZE rcvd: {}\n".format(msg_size))
+
 
 def main():
 
 	# firstly create a socket
 	clientsocket = socket(AF_INET, SOCK_DGRAM) # udp socket
 	clientsocket.settimeout(6)
-	
+
 	dnsPort = 53
 	dnsserverIP = '8.8.8.8'
 	# dnsserverIP = '208.67.222.222'
@@ -153,6 +157,10 @@ def main():
 						print(qclass)
 					else:
 						print("** Invalid query or arguments. **")
+
+				elif 'server' in query:
+					dnsserverIP = query.split()[1].strip()
+					print("Server changed to: " + str(dnsserverIP))
 				# to exit the loop the query is exit
 				elif query == "exit":
 					clientsocket.close()
