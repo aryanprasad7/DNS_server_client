@@ -67,6 +67,7 @@ def get_cname_rdata(resolved_dns, start):
 def getname(resolved_dns, start):
 	data = ''
 	# start is the bytes start
+	# print(start)
 	s = start*8
 	e = s + 8
 	back = False
@@ -75,12 +76,15 @@ def getname(resolved_dns, start):
 	# print(length)
 	n_bytes_scanned = 1
 	if length >= 192:	# meaning it is a pointer
-		offset = int(str(resolved_dns[s+2:s+16]), 2)	# offset in bytes
-		n_bytes_scanned += 1
-		s = offset*8
-		e = s + 8
-		length = int(str(resolved_dns[s:e]), 16)*8
-		back = True
+		while length >= 192:
+			offset = int(str(resolved_dns[s+2:s+16]), 2)	# offset in bytes
+			if back == False:
+				n_bytes_scanned += 1
+			s = offset*8
+			e = s + 8
+			length = int(str(resolved_dns[s:e]), 16)
+			back = True
+		length *= 8
 	else:
 		length *= 8
 	
@@ -166,6 +170,7 @@ def get_answer_from_data(resolved_dns, shift):
 	ans = {}
 	# name, type, class, ttl, rdlength, rdata
 	name, x = getname(temp_resolved_dns, shift)
+	# print(name)
 	# print('name-x: ' + str(x))
 	ans['name'] = name
 	# print(ans)
@@ -185,6 +190,7 @@ def get_answer_from_data(resolved_dns, shift):
 		ans['class'] = rclass
 		ans['type'] = 'a'
 		ans['ttl'] = ttl
+		ans['rdlength'] = rdlength
 		ans['data'] = data
 		# print(ans)
 	elif rtype == 28:	# aaaa
@@ -195,6 +201,7 @@ def get_answer_from_data(resolved_dns, shift):
 		ans['class'] = rclass
 		ans['type'] = 'aaaa'
 		ans['ttl'] = ttl
+		ans['rdlength'] = rdlength
 		ans['data'] = data
 		# print(ans)
 	elif rtype == 15:	# mx
@@ -205,6 +212,7 @@ def get_answer_from_data(resolved_dns, shift):
 		ans['class'] = rclass
 		ans['type'] = 'mx'
 		ans['ttl'] = ttl
+		ans['rdlength'] = rdlength
 		ans['data'] = data
 		# print(ans)
 	elif rtype == 6:	# soa
@@ -215,6 +223,7 @@ def get_answer_from_data(resolved_dns, shift):
 		ans['class'] = rclass
 		ans['type'] = 'soa'
 		ans['ttl'] = ttl
+		ans['rdlength'] = rdlength
 		ans['data'] = data
 		# print(ans)
 	elif rtype == 2:	# ns
@@ -225,6 +234,7 @@ def get_answer_from_data(resolved_dns, shift):
 		ans['class'] = rclass
 		ans['type'] = 'ns'
 		ans['ttl'] = ttl
+		ans['rdlength'] = rdlength
 		ans['data'] = data
 		# print(ans)
 	elif rtype == 5:	# cname
@@ -236,7 +246,27 @@ def get_answer_from_data(resolved_dns, shift):
 		ans['class'] = rclass
 		ans['type'] = 'cname'
 		ans['ttl'] = ttl
+		ans['rdlength'] = rdlength
 		ans['data'] = data
 		# print(ans)
 	
 	return ans, shift
+
+def get_answer(packet, header, shift):
+	ans = {}
+	ans['answer section'] = []
+	ans['authoritative section'] = []
+	ans['additional section'] = []
+	for i in range(0, header['ancount']):
+		rdata, shift = get_answer_from_data(packet, shift)
+		ans['answer section'].append(rdata)
+				
+	for i in range(0, header['nscount']):
+		rdata, shift = get_answer_from_data(packet, shift)
+		ans['authoritative section'].append(rdata)
+
+	for i in range(0, header['arcount']):
+		rdata, shift = get_answer_from_data(packet, shift)
+		ans['additional section'].append(rdata)
+
+	return ans

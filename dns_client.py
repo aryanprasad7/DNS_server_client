@@ -5,7 +5,6 @@ import bitstring
 from struct import *
 from build_packet import *
 import time
-import threading, multiprocessing
 import datetime
 
 def unpack_packet(resolved_dns, transaction_id):
@@ -22,43 +21,33 @@ def unpack_packet(resolved_dns, transaction_id):
 		pass
 	else:
 		print("Error: received packet not matching.")
-		return
+		return None, None, None
 
-	finalans = {}
-	finalans['answer section'] = []
-	finalans['authoritative section'] = []
-	finalans['additional section'] = []
+	finalans = None
 	if header['rcode'] == 0:
-		for i in range(0, header['ancount']):	# we will fetch the number of answers that are present
-			ans, shift = get_answer_from_data(resolved_dns, shift)
-			# finalans.append({'answer section': ans})
-			finalans['answer section'].append(ans)
-
-		for i in range(0, header['nscount']):	# we will fetch the number of answers that are present
-			ans, shift = get_answer_from_data(resolved_dns, shift)
-			finalans['authoritative section'].append(ans)
-
-		for i in range(0, header['arcount']):	# we will fetch the number of answers that are present
-			ans, shift = get_answer_from_data(resolved_dns, shift)
-			finalans['additional section'].append(ans)
-
+		finalans = get_answer(resolved_dns, header, shift)
 		return (header, question, finalans)
 
 	elif header['rcode'] == 1:
 		# format error
 		print("** Format error")
+		return None, None, None
 	elif header['rcode'] == 2:
 		# server failure
 		print("** Server failure")
+		return None, None, None
 	elif header['rcode'] == 3:
 		# name error
 		print("** Name error: the given domain name doesn't exist")
+		return None, None, None 
 	elif header['rcode'] == 4:
 		# not implemented
 		print("** The name server doesn't support the requested kind of query")
+		return None, None, None
 	elif header['rcode'] == 5:
 	 	# refused
 		print("** Refused to perform such operation")
+		return None, None, None
 
 def format_print(header, question, answer, dnsserverIP, msg_size):
 	
@@ -183,13 +172,14 @@ def main():
 								print("Timed out, sending again...")
 						
 					# print(resolved_dns)
-					if count <= 3:
+					if count < 3:
 						header, question, answer = unpack_packet(resolved_dns, transaction_id)
-						format_print(header, question, answer, dnsserverIP, len(resolved_dns))
+						if header and question and answer:
+							format_print(header, question, answer, dnsserverIP, len(resolved_dns))
 					else:
 						print("Connection timed out..")
 
-			except:
+			except KeyboardInterrupt:
 				print()
 				clientsocket.close()
 				break
@@ -224,7 +214,8 @@ def main():
 
 		if count <= 3 and resolved_dns:
 			header, question, answer = unpack_packet(resolved_dns, transaction_id)
-			format_print(header, question, answer, dnsserverIP, len(resolved_dns))
+			if header and question and answer:
+				format_print(header, question, answer, dnsserverIP, len(resolved_dns))
 		else:
 			print("Connection timed out..")
 

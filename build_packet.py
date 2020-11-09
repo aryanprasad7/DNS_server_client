@@ -16,7 +16,7 @@ def convert_to_hex(x):
 
 	return '0x' + hex_string
 
-def build_packet(query, QTYPE = 'A', QCLASS = 'IN'):
+def build_packet(query, QTYPE = 'A', QCLASS = 'IN', QR = '0', RA = '0', countlst = None):
 	# this function builds the packet on the basis of the dns headers
 	
 	DNS_query_format = [
@@ -29,20 +29,25 @@ def build_packet(query, QTYPE = 'A', QCLASS = 'IN'):
 	]
 	transaction_id = random_trans_id()	# this transaction_id is in hexadecimal string format
 	# print(transaction_id)
-	QR = '0'	# 0 => query
+	QR = QR	# 0 => query
 	opcode = '0000'
 	AA = '0'
 	TC = '0'
 	RD = '1'
-	RA = '0'
+	RA = RA	# 0 => recursion not available, 1 => recursion available
 	Z = '000'
 	RCODE = '0000' # this will be 0 for a query a response contains the RCODE to detect errors
 	# hence the total flag becomes concat(QR, opcode, ..., RCODE)
 	flags = "0b" + QR + opcode + AA + TC + RD + RA + Z + RCODE
 	QDCOUNT = 1
-	ANCOUNT = 0
-	NSCOUNT = 0
-	ARCOUNT = 0
+	if countlst == None:
+		ANCOUNT = 0
+		NSCOUNT = 0
+		ARCOUNT = 0
+	else:
+		ANCOUNT = countlst[0]
+		NSCOUNT = countlst[1]
+		ARCOUNT = countlst[2]
 	# print("TransactionID: ", transaction_id)
 	# print("flag: ", flag)
 	# print("qdcount: {}, ancount: {}, nscount: {}, arcount: {}".format(QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT))
@@ -107,7 +112,7 @@ def build_packet(query, QTYPE = 'A', QCLASS = 'IN'):
 	# print(DNS_query_format)
 	# print(DNS_query)
 	# combining the above dns header and question for the complete dns data
-	dns_data = bitstring.pack(",".join(DNS_query_format), **DNS_query)	# **DNS_header denotes unpacking the dictionary as it is here
+	dns_data = bitstring.pack(",".join(DNS_query_format), **DNS_query)	# **DNS_query denotes unpacking the dictionary as it is here
 	# print(dns_data)
 
 	return dns_data, transaction_id

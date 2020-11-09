@@ -7,6 +7,7 @@ import random
 from processing import *
 from build_packet import *
 import threading
+import ipaddress
 
 # one idea will be to use threading and keep one thread on the cache to clear the entry
 # who's TTL has finished
@@ -32,35 +33,241 @@ def make_response(question):
 	else:	# we have the record and we prepare the packet from it
 		pass
 
+def string_bytes(string):
+	string = string.split('.')
+	bytes_str = b''
+	for i in range(len(string)):
+
+		string[i] = string[i].strip()
+		length = len(string[i])
+		bytes_str += length.to_bytes(1, 'big') + string[i].encode()
+
+	bytes_str += b'\x00'
+
+	return bytes_str
+
 def handle_client_query(client_query, client_addr, serversocket):
 	serverPort = 53
 	rootserverlist = ['192.203.230.10', '199.7.83.42', '198.97.190.53', '192.112.36.4', '192.33.4.12', '198.41.0.4']
+
 	header, question, bytes_scanned = getquestion(client_query)
+	
 	response = make_response(question)
+	
+	qtype = {
+	'a': 1,
+	'aaaa': 28,
+	'soa': 6,
+	'mx': 15,
+	'ns': 2,
+	'cname': 5,
+	1: 'a',
+	28: 'aaaa',
+	6: 'soa',
+	15: 'mx',
+	2: 'ns',
+	5: 'cname'
+	}
 	client_query_type = question['qtype']
-	if client_query_type == 1:	# a
-		client_query_type = 'a'
-	elif client_query_type == 28:	# aaaa
-		client_query_type = 'aaaa'
-	elif client_query_type == 15:	# mx
-		client_query_type = 'mx'
-	elif client_query_type == 6:	# soa
-		client_query_type = 'soa'
-	elif client_query_type == 2:	# ns
-		client_query_type = 'ns'
-	elif client_query_type == 5:	# cname
-		client_query_type = 'cname'
+	client_query_type = qtype[client_query_type]
 
 	if response == None:	# record is not present in cache call the root server for the query
+
 		random_root_ip = random.choice(rootserverlist)
 		response, ans = root_server_query(client_query, random_root_ip, serverPort, client_query_type)
+	
+		# response, ans = root_query(client_query, random_root_ip, serverPort, client_query_type)
 		if ans == None: # response, directly send to client after saving in cache
 			serversocket.sendto(response, client_addr)
+	
 		else:
-			pass
+			# we have the answer now create an answer packet along with client query which will have the question
+
+			# print(ans)
+			ques = ans['question section']
+			ques['qtype'] = qtype[ques['qtype']]
+			ques['qclass'] = 'in'
+
+			# header + question
+			countls = [len(ans['answer section']), len(ans['authoritative section']), len(ans['additional section'])]
+			packet, t_id = build_packet(ques['query'], ques['qtype'], ques['qclass'], '1', '1', countls)
+			packet = packet.tobytes()
+			packet = client_query[0:2] + packet[2:]
+
+			# answer
+			for answer in ans['answer section']:
+				# name, type, class, ttl, rdlength, rdata
+				
+				# name
+				packet += string_bytes(answer['name'])
+
+				# type
+				rtype = answer['type']
+				rtype = qtype[rtype]
+				packet += rtype.to_bytes(2, 'big')
+
+				# class
+				packet += b'\x00\x01'
+
+				# ttl
+				packet += answer['ttl'].to_bytes(4, 'big')
+
+				# rdlength
+				packet += len(answer['data']).to_bytes(2, 'big')
+
+				# now depending on the type we need to change the packing technique for the data
+				if answer['type'] == 'a':
+					data = answer['data']
+					data = data.split('.')
+					for i in range(len(data)):
+						data[i] = data[i].strip()
+						packet += int(data[i]).to_bytes(1, 'big')
+
+				elif answer['type'] == 'ns' or answer['type'] == 'cname':
+					packet += string_bytes(answer['data'])
+
+				elif answer['type'] == 'mx':
+					# preference, name
+					data = answer['data']
+					pref = data[0]
+					name = data[1]
+					
+					packet += pref.to_bytes(2, 'big')
+					packet += string_bytes(name)
+
+				elif answer['type'] == 'aaaa':
+					packed += ipaddress.IPv6Address(answer['data']).packed
+
+				elif answer['type'] == 'soa':
+					# mname, rname, serial, refresh, retry, expire, minimum
+					mname, rname, serial, refresh, retry, expire, minimum = answer['data']
+
+					packet += string_bytes(mname)
+					packet += string_bytes(rname)
+					packet += serial.to_bytes(4, 'big')
+					packet += refresh.to_bytes(4, 'big')
+					packet += retry.to_bytes(4, 'big')
+					packet += expire.to_bytes(4, 'big')
+					packet += minimum.to_bytes(4, 'big')
+
+			for answer in ans['authoritative section']:
+				# name, type, class, ttl, rdlength, rdata
+				
+				# name
+				packet += string_bytes(answer['name'])
+
+				# type
+				rtype = answer['type']
+				rtype = qtype[rtype]
+				packet += rtype.to_bytes(2, 'big')
+
+				# class
+				packet += b'\x00\x01'
+
+				# ttl
+				packet += answer['ttl'].to_bytes(4, 'big')
+
+				# rdlength
+				packet += len(answer['data']).to_bytes(2, 'big')
+
+				# now depending on the type we need to change the packing technique for the data
+				if answer['type'] == 'a':
+					data = answer['data']
+					data = data.split('.')
+					for i in range(len(data)):
+						data[i] = data[i].strip()
+						packet += int(data[i]).to_bytes(1, 'big')
+
+				elif answer['type'] == 'ns' or answer['type'] == 'cname':
+					packet += string_bytes(answer['data'])
+
+				elif answer['type'] == 'aaaa':
+					packed += ipaddress.IPv6Address(answer['data']).packed
+					
+				elif answer['type'] == 'mx':
+					# preference, name
+					data = answer['data']
+					pref = data[0]
+					name = data[1]
+					
+					packet += pref.to_bytes(2, 'big')
+					packet += string_bytes(name)
+
+				elif answer['type'] == 'soa':
+					# mname, rname, serial, refresh, retry, expire, minimum
+					mname, rname, serial, refresh, retry, expire, minimum = answer['data']
+
+					packet += string_bytes(mname)
+					packet += string_bytes(rname)
+					packet += serial.to_bytes(4, 'big')
+					packet += refresh.to_bytes(4, 'big')
+					packet += retry.to_bytes(4, 'big')
+					packet += expire.to_bytes(4, 'big')
+					packet += minimum.to_bytes(4, 'big')
+
+			for answer in ans['additional section']:
+				# name, type, class, ttl, rdlength, rdata
+				
+				# name
+				packet += string_bytes(answer['name'])
+
+				# type
+				rtype = answer['type']
+				rtype = qtype[rtype]
+				packet += rtype.to_bytes(2, 'big')
+
+				# class
+				packet += b'\x00\x01'
+
+				# ttl
+				packet += answer['ttl'].to_bytes(4, 'big')
+
+				# rdlength
+				packet += len(answer['data']).to_bytes(2, 'big')
+
+				# now depending on the type we need to change the packing technique for the data
+				if answer['type'] == 'a':
+					data = answer['data']
+					data = data.split('.')
+					for i in range(len(data)):
+						data[i] = data[i].strip()
+						packet += int(data[i]).to_bytes(1, 'big')
+
+				elif answer['type'] == 'ns' or answer['type'] == 'cname':
+					packet += string_bytes(answer['data'])
+
+				elif answer['type'] == 'aaaa':
+					packet += ipaddress.IPv6Address(answer['data']).packed
+					
+				elif answer['type'] == 'mx':
+					# preference, name
+					data = answer['data']
+					pref = data[0]
+					name = data[1]
+					
+					packet += pref.to_bytes(2, 'big')
+					packet += string_bytes(name)
+
+				elif answer['type'] == 'soa':
+					# mname, rname, serial, refresh, retry, expire, minimum
+					mname, rname, serial, refresh, retry, expire, minimum = answer['data']
+
+					packet += string_bytes(mname)
+					packet += string_bytes(rname)
+					packet += serial.to_bytes(4, 'big')
+					packet += refresh.to_bytes(4, 'big')
+					packet += retry.to_bytes(4, 'big')
+					packet += expire.to_bytes(4, 'big')
+					packet += minimum.to_bytes(4, 'big')
+
+
+			print(packet)
+			# save in the cache
+			serversocket.sendto(packet, client_addr)
 	else:
 		# after processing the data we send it back to the same addr we received it from
 		serversocket.sendto(response, client_addr)
+
 
 def root_server_query(client_query, random_root_ip, serverPort, client_query_type):
 	# rootserverlist = ['192.203.230.10', '199.7.83.42', '198.97.190.53', '192.112.36.4', '192.33.4.12', '198.41.0.4']
@@ -73,6 +280,12 @@ def root_server_query(client_query, random_root_ip, serverPort, client_query_typ
 	# print("ans after contacting the root server:\n" + str(root_ans))
 	header, question, bytes_scanned = getquestion(response)
 	print(header)
+	print(question)
+
+	# check for errors from the root server
+	# if error then return the same packet with the error to the client, without doing any caching
+	if header['rcode'] != 0:
+		return response, None
 
 	# as seen from observation root dns servers do not support recursion hence we need to do iterative query
 	if header['ra'] == 1 and header['ancount']:	# recursion is available, hence we get the final answer, and we forward it to the client after saving in cache
@@ -98,6 +311,7 @@ def root_server_query(client_query, random_root_ip, serverPort, client_query_typ
 				rdata, shift = get_answer_from_data(response, shift)
 				ans['additional section'].append(rdata)
 
+			print("ans: ")
 			print(ans)
 
 			if header['ancount'] != 0:
@@ -109,18 +323,33 @@ def root_server_query(client_query, random_root_ip, serverPort, client_query_typ
 				# flag = 1
 				for answer in ans['answer section']:
 					if answer['type'] == client_query_type:
-						return response, None
-					else:	# again query the root server with the cname that we get in the answer
-						return response, None
+						ans['question section'] = question
+						return response, ans
+					# else:	# again query the root server with the cname that we get in the answer
+					# 	return response, None
 
 				for answer in ans['answer section']:
 					if answer['type'] == 'cname':
 						# query the root server again with the cname data
 						data = answer['data']
 						data2bqueried, t_id = build_packet(data)
-						resp, _ = root_server_query(data2bqueried, random_root_ip, serverPort, client_query_type)
-				# return response, None
+						resp, a = root_server_query(data2bqueried.tobytes(), random_root_ip, serverPort, client_query_type)
+						# ans['answer section'].append(a['answer section'])
+						# ans['authoritative section'].append(a['authoritative section'])
+						# ans['additional section'].append(a['additional section'])
+						for i in range(len(a['answer section'])):
+							ans['answer section'].append(a['answer section'][i])
+						for i in range(len(a['authoritative section'])):
+							ans['authoritative section'].append(a['authoritative section'][i])
+						for i in range(len(a['additional section'])):
+							ans['additional section'].append(a['additional section'][i])
+
+						print(ans)
+						ans['question section'] = question
+						return resp, ans
+
 				break
+
 			# making a list of 'a' records
 			record_a = []
 			for i in range(0, len(ans['additional section'])):
@@ -134,58 +363,112 @@ def root_server_query(client_query, random_root_ip, serverPort, client_query_typ
 			print(record_a)
 			try:
 				record = random.choice(record_a)
+				nxt_server2query = record['data']
+				print(nxt_server2query)
+
+				clientsocket.sendto(client_query, (nxt_server2query, serverPort))
+				response, nxt_addr = clientsocket.recvfrom(1024)
+				print(response)
+				
+				header, question, bytes_scanned = getquestion(response)
+				print(header)
+				print(question)
+
+				if header['rcode'] != 0:
+					return response, None
 			except:	# if there is an error in this step => we have to query the same server with a different host
 				record_ns = []
 				for i in range(0, len(ans['authoritative section'])):
+					record = ans['authoritative section'][i]
 					try:
-						if ans[i]['type'] == 'ns':
-							record_ns.append(ans[i])
+						if record['type'] == 'ns':
+							record_ns.append(record)
 					except:
 						pass
 
+				print(record_ns)
+				# try:
 				ns_2b_queried = random.choice(record_ns)['data']
+				# except:
+					# pass
 				# now prepare a packet with the query host to be 'ns_2b_queried'
 				query_packet, t_id = build_packet(ns_2b_queried)
-				clientsocket.sendto(query_packet.tobytes(), (nxt_server2query, serverPort))
-				nresponse, ns_addr = clientsocket.recvfrom(1024)
-				print(nresponse)
-				tmp_hdr, tmp_q, tmp_bs = getquestion(nresponse)
-				print(tmp_hdr)
-				tmp_shift = tmp_bs
-				tmp_ans = []
-				for i in range(0, tmp_hdr['ancount']):
-					rdata, tmp_shift = get_answer_from_data(response, tmp_shift)
-					tmp_ans.append(rdata)
+				res, a = root_server_query(query_packet.tobytes(), random_root_ip, serverPort, 'a')
+				ip = a['answer section'][0]['data']
+
+				# now query to the 'ip'
+				clientsocket.sendto(client_query, (ip, serverPort))
+				response, addr = clientsocket.recvfrom(1024)
+				print(response)
 				
-				for i in range(0, tmp_hdr['nscount']):
-					rdata, tmp_shift = get_answer_from_data(nresponse, tmp_shift)
-					tmp_ans.append(rdata)
+				header, question, bytes_scanned = getquestion(response)
+				print(header)
+				print(question)
 
-				for i in range(0, tmp_hdr['arcount']):
-					rdata, tmp_shift = get_answer_from_data(nresponse, tmp_shift)
-					tmp_ans.append(rdata)
+				# if header['rcode'] != 0:
+				# 	return response, None
 
-				print(tmp_ans)
-				rec_a = []
-				for i in range(0, len(tmp_ans)):
-					record = tmp_ans[i]
-					try:
-						if record['type'] == 'a':
-							rec_a.append(record)
-					except:
-						pass
+				"""
+				# clientsocket.sendto(query_packet.tobytes(), (nxt_server2query, serverPort))
+				# nresponse, ns_addr = clientsocket.recvfrom(1024)
+				# print(nresponse)
 
-					# print(rec_a)
-				record = random.choice(rec_a)
+				# tmp_hdr, tmp_q, tmp_bs = getquestion(res)
+				# print(tmp_hdr)
+				# print(tmp_q)
+				# tmp_shift = tmp_bs
 
-			nxt_server2query = record['data']
-			print(nxt_server2query)
+				# tmp_ans = {}
+				# tmp_ans['answer section'] = []
+				# tmp_ans['authoritative section'] = []
+				# tmp_ans['additional section'] = []
+				# for i in range(0, tmp_hdr['ancount']):
+				# 	rdata, tmp_shift = get_answer_from_data(nresponse, tmp_shift)
+				# 	tmp_ans['answer section'].append(rdata)
+				
+				# for i in range(0, tmp_hdr['nscount']):
+				# 	rdata, tmp_shift = get_answer_from_data(nresponse, tmp_shift)
+				# 	tmp_ans['authoritative section'].append(rdata)
 
-			clientsocket.sendto(client_query, (nxt_server2query, serverPort))
-			response, nxt_addr = clientsocket.recvfrom(1024)
-			print(response)
-			header, question, bytes_scanned = getquestion(response)
-			print(header)
+				# for i in range(0, tmp_hdr['arcount']):
+				# 	rdata, tmp_shift = get_answer_from_data(nresponse, tmp_shift)
+				# 	tmp_ans['additional section'].append(rdata)
+
+				# print("tmp_ans")
+				# print(tmp_ans)
+
+				# rec_a = []
+				# for i in range(0, len(tmp_ans['additional section'])):
+				# 	record = tmp_ans['additional section'][i]
+				# 	try:
+				# 		if record['type'] == 'a':
+				# 			rec_a.append(record)
+				# 	except:
+				# 		pass
+
+				# 	# print(rec_a)
+				# # try:
+				# record = random.choice(rec_a)
+				# except:	
+					# find the particular name server on the internet
+					# pass
+
+			# Initially this will the query to the tld server
+			# nxt_server2query = record['data']
+			# print(nxt_server2query)
+
+			# clientsocket.sendto(client_query, (nxt_server2query, serverPort))
+			# response, nxt_addr = clientsocket.recvfrom(1024)
+			# print(response)
+			
+			# header, question, bytes_scanned = getquestion(response)
+			# print(header)
+			# print(question)
+
+			# if header['rcode'] != 0:
+			# 	return response, None
+
+			"""
 
 def main():
 	serverPort = 53
