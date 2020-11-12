@@ -84,7 +84,7 @@ def build_packet(query, QTYPE = 'A', QCLASS = 'IN', QR = '0', RA = '0', countlst
 	count = 0
 	for i in range(len(host_name_query)):
 
-		host_name_query[i] = host_name_query[i].strip()
+		host_name_query[i] = host_name_query[i]
 
 		DNS_query_format.append("hex=qname" + str(count))
 		DNS_query["qname" + str(count)] =  convert_to_hex(len(host_name_query[i]))

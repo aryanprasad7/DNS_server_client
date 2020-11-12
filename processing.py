@@ -183,7 +183,7 @@ def get_answer_from_data(resolved_dns, shift):
 	# print(rr)
 	shift += 10
 	if rtype == 1:	# a
-		print('a')
+		# print('a')
 		data, x = get_a_rdata(temp_resolved_dns, shift*8)
 		shift += x
 		# ans.append(data)
@@ -194,7 +194,7 @@ def get_answer_from_data(resolved_dns, shift):
 		ans['data'] = data
 		# print(ans)
 	elif rtype == 28:	# aaaa
-		print('aaaa')
+		# print('aaaa')
 		data, x = get_aaaa_rdata(resolved_dns, shift)
 		shift += x
 		# ans.append(data)
@@ -205,7 +205,7 @@ def get_answer_from_data(resolved_dns, shift):
 		ans['data'] = data
 		# print(ans)
 	elif rtype == 15:	# mx
-		print('mx')
+		# print('mx')
 		data , x = get_mx_rdata(resolved_dns, shift)
 		shift += x
 		# ans.append(data)
@@ -216,7 +216,7 @@ def get_answer_from_data(resolved_dns, shift):
 		ans['data'] = data
 		# print(ans)
 	elif rtype == 6:	# soa
-		print('soa')
+		# print('soa')
 		data, x = get_soa_rdata(resolved_dns, shift)
 		shift += x
 		# ans.append(data)
@@ -227,7 +227,7 @@ def get_answer_from_data(resolved_dns, shift):
 		ans['data'] = data
 		# print(ans)
 	elif rtype == 2:	# ns
-		print('ns')
+		# print('ns')
 		data, x = get_ns_rdata(resolved_dns, shift)
 		shift += x
 		# ans.append(data)
@@ -238,7 +238,7 @@ def get_answer_from_data(resolved_dns, shift):
 		ans['data'] = data
 		# print(ans)
 	elif rtype == 5:	# cname
-		print('cname')
+		# print('cname')
 		data, x = get_cname_rdata(resolved_dns, shift)
 		# print('cname - x : ' + str(x))
 		shift += x

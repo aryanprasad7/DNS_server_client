@@ -116,6 +116,27 @@ def main():
 	dnsserverIP = '8.8.8.8'
 	# dnsserverIP = '208.67.222.222'
 	# dnsserverIP = '127.0.0.3'
+	dnsserverIP_list = []
+	try:
+		file = open('/etc/resolv.conf', 'r')
+		while True:
+			line = file.readline()
+
+			if not line:
+				break
+
+			if line.startswith('#'):
+				continue
+			elif line.startswith('nameserver'):
+				ip = line.split()[1].strip()
+				dnsserverIP_list.append(ip)
+	except:
+		print("Unable to open file")
+
+	try:
+		dnsserverIP = random.choice(dnsserverIP_list)
+	except:
+		pass
 
 	# by default
 	qtype = 'A'
