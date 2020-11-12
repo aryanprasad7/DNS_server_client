@@ -233,7 +233,7 @@ def main():
 			
 		# print(resolved_dns)
 
-		if count <= 3 and resolved_dns:
+		if count < 3 and resolved_dns:
 			header, question, answer = unpack_packet(resolved_dns, transaction_id)
 			if header and question and answer:
 				format_print(header, question, answer, dnsserverIP, len(resolved_dns))
